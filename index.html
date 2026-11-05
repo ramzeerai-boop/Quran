@@ -960,9 +960,11 @@ function App() {
       setAudioState('error');
     };
     if (audioState === 'paused' && audio.getAttribute('src')) {
-      setAudioState('playing');
+      setAudioState('loading');
       var r = audio.play();
-      if (r && r["catch"]) r["catch"](onFail);
+      if (r && r.then) r.then(function () {
+        if (!audio.paused) setAudioState('playing');
+      }, onFail);
       return;
     }
     audio.onplaying = function () {
@@ -980,7 +982,11 @@ function App() {
     setAudioState('loading');
     audio.src = blobUrlsRef.current[cacheKey] || getUrl(selectedSurah.n, selectedAyahNum);
     var p = audio.play();
-    if (p && p["catch"]) p["catch"](onFail);
+    // Some iOS versions are unreliable about the "playing" event, so also
+    // trust the play() promise once it resolves.
+    if (p && p.then) p.then(function () {
+      if (!audio.paused) setAudioState('playing');
+    }, onFail);
   };
   var audioIcon = audioState === 'playing' ? '⏸' : audioState === 'loading' ? '⏳' : '▶';
   var audioLabel = audioState === 'playing' ? 'Pause' : audioState === 'loading' ? 'Loading...' : audioState === 'paused' ? 'Resume' : 'Play';
