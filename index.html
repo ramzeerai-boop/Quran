@@ -813,88 +813,49 @@ function App() {
     });
   };
 
-  // Check cache when ayah/reciter changes
+  // Blob URLs for ayahs already saved offline (lets Play start synchronously)
+  var blobUrlsRef = useRef({});
+
+  // Check cache when ayah/reciter changes, and prepare a blob URL if saved
   useEffect(function () {
     if (!cacheKey) return;
-    _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee() {
-      var cache, hit, _t;
-      return _regenerator().w(function (_context) {
-        while (1) switch (_context.p = _context.n) {
-          case 0:
-            _context.p = 0;
-            _context.n = 1;
-            return caches.open('quran-audio-v1');
-          case 1:
-            cache = _context.v;
-            _context.n = 2;
-            return cache.match(getUrl(selectedSurah.n, selectedAyahNum));
-          case 2:
-            hit = _context.v;
-            if (hit) markCached(cacheKey);
-            _context.n = 4;
-            break;
-          case 3:
-            _context.p = 3;
-            _t = _context.v;
-          case 4:
-            return _context.a(2);
-        }
-      }, _callee, null, [[0, 3]]);
-    }))();
-    setDownloadState(isCached ? 'done' : 'idle');
+    var key = cacheKey;
+    var url = getUrl(selectedSurah.n, selectedAyahNum);
+    setDownloadState(cachedKeys[key] ? 'done' : 'idle');
+    if (typeof caches === 'undefined' || blobUrlsRef.current[key]) return;
+    caches.open('quran-audio-v1').then(function (cache) {
+      return cache.match(url);
+    }).then(function (hit) {
+      if (!hit) return;
+      return hit.blob().then(function (b) {
+        blobUrlsRef.current[key] = URL.createObjectURL(b);
+        markCached(key);
+        setDownloadState('done');
+      });
+    })["catch"](function () {});
   }, [cacheKey]);
 
-  // Stop audio when ayah changes
+  var stopAudio = function stopAudio() {
+    var audio = audioRef.current;
+    if (!audio) return;
+    audio.onplaying = audio.onwaiting = audio.onerror = audio.onended = audio.onpause = null;
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+  };
+
+  // Stop audio when ayah or reciter changes
   useEffect(function () {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
-      setAudioState('idle');
-    }
+    stopAudio();
+    setAudioState('idle');
   }, [cacheKey]);
-  var getBlobUrl = /*#__PURE__*/function () {
-    var _ref2 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee2(url) {
-      var cache, cached, _t2, _t3;
-      return _regenerator().w(function (_context2) {
-        while (1) switch (_context2.p = _context2.n) {
-          case 0:
-            _context2.p = 0;
-            _context2.n = 1;
-            return caches.open('quran-audio-v1');
-          case 1:
-            cache = _context2.v;
-            _context2.n = 2;
-            return cache.match(url);
-          case 2:
-            cached = _context2.v;
-            if (!cached) {
-              _context2.n = 4;
-              break;
-            }
-            markCached(cacheKey);
-            _t2 = URL;
-            _context2.n = 3;
-            return cached.blob();
-          case 3:
-            return _context2.a(2, _t2.createObjectURL.call(_t2, _context2.v));
-          case 4:
-            _context2.n = 6;
-            break;
-          case 5:
-            _context2.p = 5;
-            _t3 = _context2.v;
-          case 6:
-            return _context2.a(2, null);
-        }
-      }, _callee2, null, [[0, 5]]);
-    }));
-    return function getBlobUrl(_x) {
-      return _ref2.apply(this, arguments);
-    };
-  }();
+  useEffect(function () {
+    return stopAudio;
+  }, []);
+
   var downloadAyah = /*#__PURE__*/function () {
     var _ref3 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee3() {
-      var url, resp, reader, total, chunks, received, _yield$reader$read, done, value, blob, cache, _t4;
+      var key, url, resp, reader, total, chunks, received, _yield$reader$read, done, value, blob, cache, _t4;
       return _regenerator().w(function (_context3) {
         while (1) switch (_context3.p = _context3.n) {
           case 0:
@@ -904,6 +865,7 @@ function App() {
             }
             return _context3.a(2);
           case 1:
+            key = cacheKey;
             url = getUrl(selectedSurah.n, selectedAyahNum);
             setDownloadState('downloading');
             setDownloadProgress(0);
@@ -951,6 +913,7 @@ function App() {
             blob = new Blob(chunks, {
               type: 'audio/mpeg'
             });
+            blobUrlsRef.current[key] = URL.createObjectURL(blob);
             _context3.n = 9;
             return caches.open('quran-audio-v1');
           case 9:
@@ -962,7 +925,7 @@ function App() {
               }
             }));
           case 10:
-            markCached(cacheKey);
+            markCached(key);
             setDownloadState('done');
             setDownloadProgress(100);
             _context3.n = 12;
@@ -970,7 +933,7 @@ function App() {
           case 11:
             _context3.p = 11;
             _t4 = _context3.v;
-            setDownloadState('error');
+            setDownloadState(blobUrlsRef.current[key] ? 'done' : 'error');
           case 12:
             return _context3.a(2);
         }
@@ -980,68 +943,51 @@ function App() {
       return _ref3.apply(this, arguments);
     };
   }();
-  var playAudio = /*#__PURE__*/function () {
-    var _ref4 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee4() {
-      var url, _audioRef$current, _audioRef$current2, blobUrl, audio, _t5;
-      return _regenerator().w(function (_context4) {
-        while (1) switch (_context4.p = _context4.n) {
-          case 0:
-            if (!(!selectedSurah || !selectedAyahNum)) {
-              _context4.n = 1;
-              break;
-            }
-            return _context4.a(2);
-          case 1:
-            url = getUrl(selectedSurah.n, selectedAyahNum);
-            if (!(audioState === 'playing')) {
-              _context4.n = 2;
-              break;
-            }
-            (_audioRef$current = audioRef.current) === null || _audioRef$current === void 0 || _audioRef$current.pause();
-            setAudioState('paused');
-            return _context4.a(2);
-          case 2:
-            if (!(audioState === 'paused')) {
-              _context4.n = 3;
-              break;
-            }
-            (_audioRef$current2 = audioRef.current) === null || _audioRef$current2 === void 0 || _audioRef$current2.play();
-            setAudioState('playing');
-            return _context4.a(2);
-          case 3:
-            setAudioState('loading');
-            _context4.p = 4;
-            _context4.n = 5;
-            return getBlobUrl(url);
-          case 5:
-            blobUrl = _context4.v;
-            audio = audioRef.current;
-            audio.src = blobUrl || url;
-            audio.oncanplay = function () {
-              audio.play();
-              setAudioState('playing');
-            };
-            audio.onerror = function () {
-              return setAudioState('error');
-            };
-            audio.onended = function () {
-              return setAudioState('idle');
-            };
-            _context4.n = 7;
-            break;
-          case 6:
-            _context4.p = 6;
-            _t5 = _context4.v;
-            setAudioState('error');
-          case 7:
-            return _context4.a(2);
-        }
-      }, _callee4, null, [[4, 6]]);
-    }));
-    return function playAudio() {
-      return _ref4.apply(this, arguments);
+
+  // Play / pause. play() is called directly inside the tap handler (no await
+  // before it), otherwise mobile browsers block playback as "not user initiated".
+  var playAudio = function playAudio() {
+    if (!selectedSurah || !selectedAyahNum) return;
+    var audio = audioRef.current;
+    if (!audio) return;
+    if (audioState === 'playing' || audioState === 'loading') {
+      audio.pause();
+      setAudioState('paused');
+      return;
+    }
+    var onFail = function onFail(err) {
+      if (err && err.name === 'AbortError') return; // interrupted by pause/change
+      setAudioState('error');
     };
-  }();
+    if (audioState === 'paused' && audio.getAttribute('src')) {
+      setAudioState('loading');
+      var r = audio.play();
+      if (r && r.then) r.then(function () {
+        if (!audio.paused) setAudioState('playing');
+      }, onFail);
+      return;
+    }
+    audio.onplaying = function () {
+      return setAudioState('playing');
+    };
+    audio.onwaiting = function () {
+      return setAudioState('loading');
+    };
+    audio.onerror = function () {
+      return setAudioState('error');
+    };
+    audio.onended = function () {
+      return setAudioState('idle');
+    };
+    setAudioState('loading');
+    audio.src = blobUrlsRef.current[cacheKey] || getUrl(selectedSurah.n, selectedAyahNum);
+    var p = audio.play();
+    // Some iOS versions are unreliable about the "playing" event, so also
+    // trust the play() promise once it resolves.
+    if (p && p.then) p.then(function () {
+      if (!audio.paused) setAudioState('playing');
+    }, onFail);
+  };
   var audioIcon = audioState === 'playing' ? '⏸' : audioState === 'loading' ? '⏳' : '▶';
   var audioLabel = audioState === 'playing' ? 'Pause' : audioState === 'loading' ? 'Loading...' : audioState === 'paused' ? 'Resume' : 'Play';
   var audioBg = audioState === 'error' ? '#fff1f2' : audioState === 'playing' ? '#10b981' : '#6366f1';
@@ -1691,7 +1637,8 @@ function App() {
     }
   }, "Could not play. Check your connection.")), /*#__PURE__*/React.createElement("audio", {
     ref: audioRef,
-    preload: "none"
+    preload: "auto",
+    playsInline: true
   })), !ayah && !editing && !showPicker && /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
