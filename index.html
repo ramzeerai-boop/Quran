@@ -816,6 +816,30 @@ function App() {
   // Blob URLs for ayahs already saved offline (lets Play start synchronously)
   var blobUrlsRef = useRef({});
 
+  // Ayah range playback: rangeRef holds the active range while it plays
+  var rangeRef = useRef(null);
+  var _useStateR1 = useState(1),
+    _useStateR2 = _slicedToArray(_useStateR1, 2),
+    rangeFrom = _useStateR2[0],
+    setRangeFrom = _useStateR2[1];
+  var _useStateR3 = useState(1),
+    _useStateR4 = _slicedToArray(_useStateR3, 2),
+    rangeTo = _useStateR4[0],
+    setRangeTo = _useStateR4[1];
+  var _useStateR5 = useState(null),
+    _useStateR6 = _slicedToArray(_useStateR5, 2),
+    rangeInfo = _useStateR6[0],
+    setRangeInfo = _useStateR6[1];
+  var makeKey = function makeKey(sN, aN) {
+    return "".concat(reciter, "-").concat(sN, "-").concat(aN);
+  };
+  // Default range when a new surah is opened: current ayah to end of surah
+  useEffect(function () {
+    if (!selectedSurah) return;
+    setRangeFrom(Number(selectedAyahNum) || 1);
+    setRangeTo(selectedSurah.ayahs);
+  }, [selectedSurah ? selectedSurah.n : 0]);
+
   // Check cache when ayah/reciter changes, and prepare a blob URL if saved
   useEffect(function () {
     if (!cacheKey) return;
@@ -846,6 +870,11 @@ function App() {
 
   // Stop audio when ayah or reciter changes
   useEffect(function () {
+    if (rangeRef.current && rangeRef.current.key === cacheKey) return;
+    if (rangeRef.current) {
+      rangeRef.current = null;
+      setRangeInfo(null);
+    }
     stopAudio();
     setAudioState('idle');
   }, [cacheKey]);
@@ -967,6 +996,23 @@ function App() {
       }, onFail);
       return;
     }
+    rangeRef.current = null;
+    setRangeInfo(null);
+    startAyah(selectedSurah, Number(selectedAyahNum));
+  };
+
+  // Start one ayah on the shared <audio> element. When a range is active,
+  // the next ayah starts from the "ended" event, which iOS allows once the
+  // element has been started by a tap.
+  var startAyah = function startAyah(s, n) {
+    var audio = audioRef.current;
+    if (!audio) return;
+    var onFail = function onFail(err) {
+      if (err && err.name === 'AbortError') return; // interrupted by pause/change
+      rangeRef.current = null;
+      setRangeInfo(null);
+      setAudioState('error');
+    };
     audio.onplaying = function () {
       return setAudioState('playing');
     };
@@ -974,19 +1020,57 @@ function App() {
       return setAudioState('loading');
     };
     audio.onerror = function () {
-      return setAudioState('error');
+      return onFail();
     };
     audio.onended = function () {
-      return setAudioState('idle');
+      var r = rangeRef.current;
+      if (r && n < r.to) {
+        var next = n + 1;
+        r.key = makeKey(s.n, next);
+        setRangeInfo({
+          from: r.from,
+          to: r.to,
+          current: next
+        });
+        loadAyah(s, next);
+        startAyah(s, next);
+        return;
+      }
+      rangeRef.current = null;
+      setRangeInfo(null);
+      setAudioState('idle');
     };
     setAudioState('loading');
-    audio.src = blobUrlsRef.current[cacheKey] || getUrl(selectedSurah.n, selectedAyahNum);
+    audio.src = blobUrlsRef.current[makeKey(s.n, n)] || getUrl(s.n, n);
     var p = audio.play();
     // Some iOS versions are unreliable about the "playing" event, so also
     // trust the play() promise once it resolves.
     if (p && p.then) p.then(function () {
       if (!audio.paused) setAudioState('playing');
     }, onFail);
+  };
+  var playRange = function playRange() {
+    if (!selectedSurah) return;
+    var from = Math.max(1, Math.min(Number(rangeFrom), selectedSurah.ayahs));
+    var to = Math.max(from, Math.min(Number(rangeTo), selectedSurah.ayahs));
+    rangeRef.current = {
+      from: from,
+      to: to,
+      key: makeKey(selectedSurah.n, from)
+    };
+    setRangeInfo({
+      from: from,
+      to: to,
+      current: from
+    });
+    if (Number(selectedAyahNum) !== from) loadAyah(selectedSurah, from);
+    startAyah(selectedSurah, from);
+  };
+  var stopRange = function stopRange() {
+    rangeRef.current = null;
+    setRangeInfo(null);
+    stopAudio();
+    setAudioState('idle');
   };
   var audioIcon = audioState === 'playing' ? '⏸' : audioState === 'loading' ? '⏳' : '▶';
   var audioLabel = audioState === 'playing' ? 'Pause' : audioState === 'loading' ? 'Loading...' : audioState === 'paused' ? 'Resume' : 'Play';
@@ -1628,7 +1712,98 @@ function App() {
       borderRadius: 99,
       transition: "width .3s"
     }
-  })), audioState === 'error' && /*#__PURE__*/React.createElement("p", {
+  })), selectedSurah && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 8,
+      padding: "10px 12px",
+      background: "#fafbff",
+      border: "1.5px solid #e0e7ff",
+      borderRadius: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      fontSize: 13,
+      color: "#475569",
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700
+    }
+  }, "Range"), /*#__PURE__*/React.createElement("span", null, "from"), /*#__PURE__*/React.createElement("select", {
+    "aria-label": "Range start ayah",
+    value: rangeFrom,
+    disabled: !!rangeInfo,
+    onChange: function onChange(e) {
+      var v = Number(e.target.value);
+      setRangeFrom(v);
+      if (Number(rangeTo) < v) setRangeTo(v);
+    },
+    style: {
+      padding: "6px 8px",
+      fontSize: 13,
+      border: "1.5px solid #e0e7ff",
+      borderRadius: 8,
+      background: "white",
+      color: "#475569"
+    }
+  }, Array.from({
+    length: selectedSurah.ayahs
+  }, function (_, i) {
+    return /*#__PURE__*/React.createElement("option", {
+      key: i + 1,
+      value: i + 1
+    }, i + 1);
+  })), /*#__PURE__*/React.createElement("span", null, "to"), /*#__PURE__*/React.createElement("select", {
+    "aria-label": "Range end ayah",
+    value: rangeTo,
+    disabled: !!rangeInfo,
+    onChange: function onChange(e) {
+      return setRangeTo(Number(e.target.value));
+    },
+    style: {
+      padding: "6px 8px",
+      fontSize: 13,
+      border: "1.5px solid #e0e7ff",
+      borderRadius: 8,
+      background: "white",
+      color: "#475569"
+    }
+  }, Array.from({
+    length: selectedSurah.ayahs - Number(rangeFrom) + 1
+  }, function (_, i) {
+    var v = Number(rangeFrom) + i;
+    return /*#__PURE__*/React.createElement("option", {
+      key: v,
+      value: v
+    }, v);
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: rangeInfo ? stopRange : playRange,
+    style: {
+      marginLeft: "auto",
+      padding: "8px 14px",
+      borderRadius: 8,
+      border: "none",
+      cursor: "pointer",
+      background: rangeInfo ? "#f43f5e" : "#6366f1",
+      color: "white",
+      fontSize: 13,
+      fontWeight: 700,
+      whiteSpace: "nowrap"
+    }
+  }, rangeInfo ? "\u25A0 Stop" : "\u25B6 Play range")), rangeInfo && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: "#6366f1",
+      textAlign: "center",
+      fontWeight: 600
+    }
+  }, "Ayah ", rangeInfo.current, " of ", rangeInfo.from, "\u2013", rangeInfo.to, " (", rangeInfo.current - rangeInfo.from + 1, "/", rangeInfo.to - rangeInfo.from + 1, ")")), audioState === 'error' && /*#__PURE__*/React.createElement("p", {
     style: {
       fontSize: 11,
       color: "#f43f5e",
